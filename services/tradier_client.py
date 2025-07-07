@@ -19,3 +19,12 @@ class TradierClient:
         response = requests.get(f"{self.base_url}/history", headers=self.headers, params=params)
         response.raise_for_status()
         return response.json()
+
+    def get_news(self, symbol: str, limit: int = 20):
+        params = {
+            "symbols": symbol,
+            "limit": limit
+        }
+        response = requests.get(f"{self.base_url}/news", headers=self.headers, params=params)
+        response.raise_for_status()
+        return response.json()
