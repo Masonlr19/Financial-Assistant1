@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import altair as alt
 
 from services.tradier_client import TradierClient
+from services.sentiment_analyzer import SentimentAnalyzer
 from models.weekly_predictor import WeeklyPredictorDataPreparer
 from models.xgboost_model import XGBoostPricePredictor
 
@@ -39,7 +40,7 @@ def main():
     api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(api_key)
 
-    tab1, tab2 = st.tabs(["📈 Predictions", "📊 Historical Data"])
+    tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
     with tab2:
         if st.button("Show Historical Data"):
@@ -80,6 +81,38 @@ def main():
 
                 except Exception as e:
                     st.error(f"Prediction error: {e}")
+
+    with tab3:
+        st.header(f"📰 News Sentiment for {symbol}")
+
+        if st.button("Fetch and Analyze News Sentiment"):
+            with st.spinner("Fetching news and analyzing sentiment..."):
+                try:
+                    news_data = tradier_client.get_news(symbol)
+                    analyzer = SentimentAnalyzer()
+
+                    sentiments = {'positive': 0, 'neutral': 0, 'negative': 0}
+                    compound_scores = []
+
+                    for article in news_data.get('news', []):
+                        headline = article['headline']
+                        sentiment, score = analyzer.analyze_sentiment(headline)
+                        sentiments[sentiment] += 1
+                        compound_scores.append(score)
+
+                    avg_score = sum(compound_scores) / len(compound_scores) if compound_scores else 0
+                    st.write(f"### Average Sentiment Score: {avg_score:.3f}")
+
+                    st.bar_chart(sentiments)
+
+                    st.subheader("News Headlines with Sentiment")
+                    for article in news_data.get('news', []):
+                        headline = article['headline']
+                        sentiment, _ = analyzer.analyze_sentiment(headline)
+                        st.write(f"**[{sentiment.upper()}]** {headline}")
+
+                except Exception as e:
+                    st.error(f"Error fetching or analyzing news: {e}")
 
 
 if __name__ == "__main__":
