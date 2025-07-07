@@ -1,10 +1,11 @@
 streamlit
 requests
 pandas
-numpy
-scikit-learn
-xgboost
 matplotlib
 altair
+scikit-learn
+xgboost
 vaderSentiment
-shap
+newsapi-python
+joblib
+
