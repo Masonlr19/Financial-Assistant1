@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
-import os
-import joblib
 
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
@@ -11,12 +9,6 @@ from services.sentiment_analyzer import SentimentAnalyzer
 from models.weekly_predictor import WeeklyPredictorDataPreparer
 from models.xgboost_model import XGBoostPricePredictor
 
-
-def load_trained_model(symbol):
-    model_path = f"models/{symbol}_xgboost_model.pkl"
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Trained model for {symbol} not found. Please train it first.")
-    return joblib.load(model_path)
 
 def plot_historical_prices(data):
     df = pd.DataFrame(data['history']['day'])
@@ -27,6 +19,7 @@ def plot_historical_prices(data):
     ).properties(title="📊 Historical Close Prices")
     st.altair_chart(chart, use_container_width=True)
 
+
 def plot_prediction_confidence(confs):
     fig, ax = plt.subplots()
     ax.bar(range(1, 6), confs, color='green')
@@ -34,6 +27,7 @@ def plot_prediction_confidence(confs):
     ax.set_xlabel("Week")
     ax.set_ylabel("Confidence (%)")
     st.pyplot(fig)
+
 
 def main():
     st.set_page_config(page_title="Financial Assistant", layout="wide")
@@ -49,7 +43,10 @@ def main():
 
     # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
-    newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
+    if newsapi_api_key:
+        newsapi_client = NewsApiClient(newsapi_api_key)
+    else:
+        newsapi_client = None
 
     tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
@@ -60,6 +57,8 @@ def main():
                     data = tradier_client.get_historical_data(symbol)
                     st.success("Data fetched successfully!")
                     plot_historical_prices(data)
+                    st.subheader("Raw JSON Response")
+                    st.json(data)
                 except Exception as e:
                     st.error(f"Error fetching data: {e}")
 
@@ -67,48 +66,47 @@ def main():
         if st.button("Run Weekly Price Predictions"):
             with st.spinner("Running ML model..."):
                 try:
-                data = tradier_client.get_historical_data(symbol)
+                    data = tradier_client.get_historical_data(symbol)
 
-                preparer = WeeklyPredictorDataPreparer()
-                X, y, prepared_data = preparer.prepare_data(data)
+                    preparer = WeeklyPredictorDataPreparer()
+                    X, y, prepared_data = preparer.prepare_data(data)
 
-                predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-                predictor.train(X, y)
+                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
+                    predictor.train(X, y)
 
-                preds, confs = predictor.predict_next_5_weeks()
+                    preds, confs = predictor.predict_next_5_weeks()
 
-                st.success("Prediction complete!")
+                    st.success("Prediction complete!")
 
-                # Show training metrics
-                st.subheader("🔍 Training Metrics")
-                metrics = predictor.metrics
-                st.write(f"Accuracy: {metrics['accuracy']:.2f}")
-                st.write(f"Precision: {metrics['precision']:.2f}")
-                st.write(f"Recall: {metrics['recall']:.2f}")
-                st.write(f"F1 Score: {metrics['f1_score']:.2f}")
-                st.write(f"ROC-AUC Score: {metrics['roc_auc']:.2f}")
+                    # Show training metrics
+                    st.subheader("🔍 Training Metrics")
+                    metrics = predictor.metrics
+                    st.write(f"Accuracy: {metrics['accuracy']:.2f}")
+                    st.write(f"Precision: {metrics['precision']:.2f}")
+                    st.write(f"Recall: {metrics['recall']:.2f}")
+                    st.write(f"F1 Score: {metrics['f1_score']:.2f}")
+                    st.write(f"ROC-AUC Score: {metrics['roc_auc']:.2f}")
 
-                st.subheader("🧮 Confusion Matrix")
-                st.write(
-                    pd.DataFrame(
-                        metrics['confusion_matrix'],
-                        columns=['Predicted Down', 'Predicted Up'],
-                        index=['Actual Down', 'Actual Up']
+                    st.subheader("🧮 Confusion Matrix")
+                    st.write(
+                        pd.DataFrame(
+                            metrics['confusion_matrix'],
+                            columns=['Predicted Down', 'Predicted Up'],
+                            index=['Actual Down', 'Actual Up']
+                        )
                     )
-                )
 
-                # Show prediction summary
-                st.subheader("Prediction Summary")
-                for i, (p, c) in enumerate(zip(preds, confs), 1):
-                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                    st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+                    # Show prediction summary
+                    st.subheader("Prediction Summary")
+                    for i, (p, c) in enumerate(zip(preds, confs), 1):
+                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
 
-                # Show confidence chart
-                plot_prediction_confidence(confs)
+                    # Show confidence chart
+                    plot_prediction_confidence(confs)
 
-            except Exception as e:
-                st.error(f"Prediction error: {e}")
-
+                except Exception as e:
+                    st.error(f"Prediction error: {e}")
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
@@ -116,7 +114,9 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
+                    # Tradier news
                     tradier_news_data = tradier_client.get_news(symbol)
+
                     analyzer = SentimentAnalyzer()
 
                     def analyze_news_list(news_list, key_headline):
@@ -136,6 +136,7 @@ def main():
                         tradier_news_data.get('news', []), 'headline'
                     )
 
+                    # NewsAPI news
                     if newsapi_client:
                         newsapi_news_data = newsapi_client.get_news(symbol)
                         newsapi_sentiments, newsapi_avg, newsapi_headlines = analyze_news_list(
@@ -171,3 +172,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
