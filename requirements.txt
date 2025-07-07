@@ -13,7 +13,8 @@ joblib
 sentence-transformers
 
 # Deep learning hybrid model
-tensorflow
+tensorflow>=2.19.0
+
 
 # APIs & HTTP requests
 requests
