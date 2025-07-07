@@ -43,10 +43,7 @@ def main():
 
     # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
-    if newsapi_api_key:
-        newsapi_client = NewsApiClient(newsapi_api_key)
-    else:
-        newsapi_client = None
+    newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
 
     tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
@@ -96,7 +93,7 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
-                    # Tradier news
+                    # Tradier news with 404 error handling inside get_news method
                     tradier_news_data = tradier_client.get_news(symbol)
 
                     analyzer = SentimentAnalyzer()
@@ -106,7 +103,7 @@ def main():
                         compound_scores = []
                         headlines_sentiments = []
                         for article in news_list:
-                            headline = article[key_headline]
+                            headline = article.get(key_headline, "")
                             sentiment, score = analyzer.analyze_sentiment(headline)
                             sentiments[sentiment] += 1
                             compound_scores.append(score)
@@ -154,4 +151,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
