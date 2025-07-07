@@ -9,3 +9,4 @@ vaderSentiment
 newsapi-python
 joblib
 sentence-transformers
+tensorflow
