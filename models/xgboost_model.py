@@ -32,3 +32,9 @@ class XGBoostPricePredictor:
             last_features = np.array([[next_return_1w, next_return_2w, next_ma_3w, next_ma_5w]])
 
         return preds, confs
+
+def __init__(self, scaler, prepared_data, preloaded_model=None):
+    self.scaler = scaler
+    self.prepared_data = prepared_data
+    self.model = preloaded_model  # Use loaded model if provided
+
