@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
+import joblib
+import os
 
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
@@ -9,8 +11,10 @@ from services.sentiment_analyzer import SentimentAnalyzer
 
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
-import joblib
-import os
+
+# Hybrid model imports
+from models.hybrid_data_preparer import HybridDataPreparer
+from models.hybrid_model import HybridPricePredictor
 
 # === Predictor class with fixes and future features generation ===
 class XGBoostPricePredictor:
@@ -126,15 +130,14 @@ def main():
     st.sidebar.header("🔧 Settings")
     symbol = st.sidebar.text_input("Stock Symbol", value="AAPL")
 
-    # Tradier Client
     tradier_api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(tradier_api_key)
 
-    # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
     newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
 
-    tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
+    # Add new tab
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment", "🤖 Hybrid Model"])
 
     with tab2:
         if st.button("Show Historical Data"):
@@ -153,10 +156,8 @@ def main():
             with st.spinner("Running ML model..."):
                 try:
                     data = tradier_client.get_historical_data(symbol)
-
                     preparer = WeeklyPredictorDataPreparer()
                     X, y, prepared_data = preparer.prepare_data(data)
-
                     predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
 
                     try:
@@ -187,7 +188,6 @@ def main():
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
                     tradier_news_data = tradier_client.get_news(symbol)
-
                     analyzer = SentimentAnalyzer()
 
                     def analyze_news_list(news_list, key_headline):
@@ -239,9 +239,50 @@ def main():
                 except Exception as e:
                     st.error(f"Error fetching or analyzing news: {e}")
 
+    # === NEW Hybrid Model Tab ===
+    with tab4:
+        st.header("🤖 Hybrid Model Predictions")
+
+        if st.button("Run Hybrid Model Predictions"):
+            with st.spinner("Running Hybrid ML model..."):
+                try:
+                    # Get historical price data
+                    data = tradier_client.get_historical_data(symbol)
+                    historical_df = pd.DataFrame(data['history']['day'])
+                    historical_df['date'] = pd.to_datetime(historical_df['date'])
+
+                    # Example: Mock function, replace with your real implementation
+                    headlines_per_week = tradier_client.get_weekly_news_headlines(symbol, weeks=20)
+
+                    # Prepare data
+                    seq_len = 10
+                    price_features = ['close', 'volume']
+                    preparer = HybridDataPreparer(seq_len=seq_len)
+
+                    price_seq = preparer.prepare_price_sequences(historical_df[price_features])
+                    sentiment_seq = preparer.prepare_sentiment_sequences(headlines_per_week)
+                    labels = preparer.prepare_labels(historical_df)
+
+                    # Initialize and train/load model
+                    predictor = HybridPricePredictor(seq_len=seq_len, num_price_features=len(price_features), sentiment_embedding_dim=384)
+
+                    try:
+                        predictor.load_model()
+                        st.success("Loaded pre-trained Hybrid model.")
+                    except Exception:
+                        st.warning("No pre-trained Hybrid model found, training now...")
+                        predictor.train(price_seq, sentiment_seq, labels)
+
+                    # Predict on the last available 5 weeks
+                    preds, confs = predictor.predict(price_seq[-5:], sentiment_seq[-5:])
+
+                    st.subheader("Prediction Summary")
+                    for i, (p, c) in enumerate(zip(preds, confs), 1):
+                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+
+                except Exception as e:
+                    st.error(f"Hybrid model error: {e}")
+
 if __name__ == "__main__":
     main()
-
-
-
-
