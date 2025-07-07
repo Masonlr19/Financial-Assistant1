@@ -64,45 +64,51 @@ def main():
                     st.error(f"Error fetching data: {e}")
 
     with tab1:
-       
-        if st.button("Train Model"):
-            with st.spinner("Training model..."):
-                try:
-                    data = tradier_client.get_historical_data(symbol)
-                    preparer = WeeklyPredictorDataPreparer()
-                    X, y, prepared_data = preparer.prepare_data(data)
-
-                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-                    predictor.train(X, y)
-
-                    import joblib
-                    joblib.dump(predictor.model, f"models/{symbol}_xgboost_model.pkl")
-
-                    st.success(f"Model trained and saved for {symbol}!")
-                except Exception as e:
-                    st.error(f"Training error: {e}")
-
         if st.button("Run Weekly Price Predictions"):
-            with st.spinner("Loading model and predicting..."):
+            with st.spinner("Running ML model..."):
                 try:
-                    data = tradier_client.get_historical_data(symbol)
-                    preparer = WeeklyPredictorDataPreparer()
-                    _, _, prepared_data = preparer.prepare_data(data)
+                data = tradier_client.get_historical_data(symbol)
 
-                    model = load_trained_model(symbol)
-                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data, preloaded_model=model)
-                    preds, confs = predictor.predict_next_5_weeks()
+                preparer = WeeklyPredictorDataPreparer()
+                X, y, prepared_data = preparer.prepare_data(data)
 
-                    st.success("Prediction complete!")
-                    st.subheader("Prediction Summary")
-                    for i, (p, c) in enumerate(zip(preds, confs), 1):
-                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+                predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
+                predictor.train(X, y)
 
-                    plot_prediction_confidence(confs)
+                preds, confs = predictor.predict_next_5_weeks()
 
-                except Exception as e:
-                    st.error(f"Prediction error: {e}")
+                st.success("Prediction complete!")
+
+                # Show training metrics
+                st.subheader("🔍 Training Metrics")
+                metrics = predictor.metrics
+                st.write(f"Accuracy: {metrics['accuracy']:.2f}")
+                st.write(f"Precision: {metrics['precision']:.2f}")
+                st.write(f"Recall: {metrics['recall']:.2f}")
+                st.write(f"F1 Score: {metrics['f1_score']:.2f}")
+                st.write(f"ROC-AUC Score: {metrics['roc_auc']:.2f}")
+
+                st.subheader("🧮 Confusion Matrix")
+                st.write(
+                    pd.DataFrame(
+                        metrics['confusion_matrix'],
+                        columns=['Predicted Down', 'Predicted Up'],
+                        index=['Actual Down', 'Actual Up']
+                    )
+                )
+
+                # Show prediction summary
+                st.subheader("Prediction Summary")
+                for i, (p, c) in enumerate(zip(preds, confs), 1):
+                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                    st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+
+                # Show confidence chart
+                plot_prediction_confidence(confs)
+
+            except Exception as e:
+                st.error(f"Prediction error: {e}")
+
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
