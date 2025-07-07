@@ -63,7 +63,8 @@ def main():
                 except Exception as e:
                     st.error(f"Error fetching data: {e}")
 
-        with tab1:
+    with tab1:
+       
         if st.button("Train Model"):
             with st.spinner("Training model..."):
                 try:
