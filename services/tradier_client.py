@@ -25,7 +25,14 @@ class TradierClient:
             "symbols": symbol,
             "limit": limit
         }
-        response = requests.get(f"{self.base_url}/news", headers=self.headers, params=params)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = requests.get(f"{self.base_url}/news", headers=self.headers, params=params)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 404:
+                # No news found for the symbol, return empty list instead of error
+                return {"news": []}
+            else:
+                raise e
 
