@@ -17,3 +17,4 @@ tensorflow
 
 # APIs & HTTP requests
 requests
+vaderSentiment
