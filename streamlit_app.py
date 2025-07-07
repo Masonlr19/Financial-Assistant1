@@ -63,56 +63,43 @@ def main():
                     st.error(f"Error fetching data: {e}")
 
     with tab1:
-        if st.button("Run Weekly Price Predictions"):
-            with st.spinner("Running ML model..."):
+    if st.button("Run Weekly Price Predictions"):
+        with st.spinner("Running ML model..."):
+            try:
+                data = tradier_client.get_historical_data(symbol)
+
+                preparer = WeeklyPredictorDataPreparer()
+                X, y, prepared_data = preparer.prepare_data(data)
+
+                predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
+
+                # Try loading saved model, otherwise train new
                 try:
-                    data = tradier_client.get_historical_data(symbol)
+                    predictor.load_model()
+                    st.info("Loaded pre-trained model.")
+                except FileNotFoundError:
+                    st.info("No pre-trained model found, training new model...")
+                    predictor.train(X, y)
 
-                    preparer = WeeklyPredictorDataPreparer()
-                    X, y, prepared_data = preparer.prepare_data(data)
+                preds, confs = predictor.predict_next_5_weeks()
 
-predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-try:
-    predictor.load_model()
-except FileNotFoundError:
-    st.warning("No pre-trained model found, training a new one...")
-    predictor.train(X, y)
+                st.success("Prediction complete!")
 
-
-
-                    preds, confs = predictor.predict_next_5_weeks()
-
-                    st.success("Prediction complete!")
-
-                    # Show training metrics
-                    st.subheader("🔍 Training Metrics")
-                    metrics = predictor.metrics
-                    st.write(f"Accuracy: {metrics['accuracy']:.2f}")
-                    st.write(f"Precision: {metrics['precision']:.2f}")
-                    st.write(f"Recall: {metrics['recall']:.2f}")
-                    st.write(f"F1 Score: {metrics['f1_score']:.2f}")
-                    st.write(f"ROC-AUC Score: {metrics['roc_auc']:.2f}")
-
-                    st.subheader("🧮 Confusion Matrix")
-                    st.write(
-                        pd.DataFrame(
-                            metrics['confusion_matrix'],
-                            columns=['Predicted Down', 'Predicted Up'],
-                            index=['Actual Down', 'Actual Up']
-                        )
+                # Show metrics with confidence explanation
+                st.subheader("Prediction Summary")
+                for i, (p, c) in enumerate(zip(preds, confs), 1):
+                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                    st.metric(
+                        label=f"Week {i}",
+                        value=direction,
+                        delta=f"{c}% confidence"
                     )
 
-                    # Show prediction summary
-                    st.subheader("Prediction Summary")
-                    for i, (p, c) in enumerate(zip(preds, confs), 1):
-                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+                # Show confidence chart
+                plot_prediction_confidence(confs)
 
-                    # Show confidence chart
-                    plot_prediction_confidence(confs)
-
-                except Exception as e:
-                    st.error(f"Prediction error: {e}")
+            except Exception as e:
+                st.error(f"Prediction error: {e}")
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
