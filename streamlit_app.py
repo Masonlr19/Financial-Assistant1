@@ -6,10 +6,100 @@ import altair as alt
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
 from services.sentiment_analyzer import SentimentAnalyzer
-from models.weekly_predictor import WeeklyPredictorDataPreparer
-from models.xgboost_model import XGBoostPricePredictor
 
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+import joblib
+import os
 
+# === Predictor class with fixes and future features generation ===
+class XGBoostPricePredictor:
+    def __init__(self, scaler, prepared_data=None, model_path="xgboost_model.joblib", scaler_path="scaler.joblib"):
+        self.scaler = scaler
+        self.prepared_data = prepared_data or {}
+        self.model_path = model_path
+        self.scaler_path = scaler_path
+        self.model = None
+
+    def train(self, X, y):
+        self.model = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
+        self.model.fit(X, y)
+        self.save_model()
+
+    def save_model(self):
+        if self.model is not None:
+            joblib.dump(self.model, self.model_path)
+        if self.scaler is not None:
+            joblib.dump(self.scaler, self.scaler_path)
+
+    def load_model(self):
+        if not os.path.exists(self.model_path) or not os.path.exists(self.scaler_path):
+            raise FileNotFoundError("Model or scaler file not found.")
+        self.model = joblib.load(self.model_path)
+        self.scaler = joblib.load(self.scaler_path)
+
+    def generate_future_features(self, n_weeks=5):
+        hist_df = self.prepared_data.get('historical_features', None)
+        if hist_df is None or hist_df.empty:
+            raise ValueError("No historical features found to generate future features.")
+        last_date = hist_df['date'].max()
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=7), periods=n_weeks, freq='W-FRI')
+        template = hist_df.drop(columns=['date']).iloc[-1]
+        future_features = pd.DataFrame([template.values] * n_weeks, columns=template.index)
+        future_features['date'] = future_dates
+        cols = ['date'] + [c for c in future_features.columns if c != 'date']
+        future_features = future_features[cols]
+        return future_features
+
+    def predict_next_5_weeks(self):
+        if self.model is None:
+            raise ValueError("Model is not loaded or trained.")
+        future_features = self.prepared_data.get('future_features', None)
+        if future_features is None or len(future_features) < 5:
+            future_features = self.generate_future_features(n_weeks=5)
+        if 'date' in future_features.columns:
+            X_future = future_features.drop(columns=['date'])
+        else:
+            X_future = future_features
+        X_scaled = self.scaler.transform(X_future)
+        probas = self.model.predict_proba(X_scaled)[:, 1]
+        preds = (probas >= 0.5).astype(int)
+        confs = (probas * 100).round(1)
+        return preds.tolist(), confs.tolist()
+
+# === Data Preparer with feature engineering and future features ===
+class WeeklyPredictorDataPreparer:
+    def __init__(self):
+        self.scaler = StandardScaler()
+
+    def prepare_data(self, raw_data):
+        df = pd.DataFrame(raw_data['history']['day'])
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        df['return'] = df['close'].pct_change()
+        df['ma_3'] = df['close'].rolling(window=3).mean()
+        df['ma_5'] = df['close'].rolling(window=5).mean()
+        df = df.dropna().reset_index(drop=True)
+        df['target'] = (df['close'].shift(-1) > df['close']).astype(int)
+        df = df.dropna().reset_index(drop=True)
+        feature_cols = ['return', 'ma_3', 'ma_5']
+        X = df[feature_cols]
+        y = df['target']
+        X_scaled = self.scaler.fit_transform(X)
+        historical_features = df[['date'] + feature_cols].copy()
+        last_features = historical_features.iloc[-1][feature_cols]
+        last_date = historical_features.iloc[-1]['date']
+        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=7), periods=5, freq='W-FRI')
+        future_features = pd.DataFrame([last_features.values] * 5, columns=feature_cols)
+        future_features['date'] = future_dates
+        future_features = future_features[['date'] + feature_cols]
+        prepared_data = {
+            'historical_features': historical_features,
+            'future_features': future_features
+        }
+        return X_scaled, y.values, prepared_data
+
+# === Plot helpers ===
 def plot_historical_prices(data):
     df = pd.DataFrame(data['history']['day'])
     df['date'] = pd.to_datetime(df['date'])
@@ -19,7 +109,6 @@ def plot_historical_prices(data):
     ).properties(title="📊 Historical Close Prices")
     st.altair_chart(chart, use_container_width=True)
 
-
 def plot_prediction_confidence(confs):
     fig, ax = plt.subplots()
     ax.bar(range(1, 6), confs, color='green')
@@ -28,23 +117,7 @@ def plot_prediction_confidence(confs):
     ax.set_ylabel("Confidence (%)")
     st.pyplot(fig)
 
-
-def confidence_explanation(confidence):
-    """
-    Returns a user-friendly explanation string for confidence values.
-    """
-    if confidence >= 80:
-        return "Very high confidence in this prediction."
-    elif confidence >= 60:
-        return "Moderate to high confidence."
-    elif confidence >= 40:
-        return "Moderate confidence."
-    elif confidence >= 20:
-        return "Low confidence."
-    else:
-        return "Very low confidence; prediction uncertain."
-
-
+# === Streamlit App ===
 def main():
     st.set_page_config(page_title="Financial Assistant", layout="wide")
     st.title("💰 ML Financial Assistant")
@@ -53,16 +126,13 @@ def main():
     st.sidebar.header("🔧 Settings")
     symbol = st.sidebar.text_input("Stock Symbol", value="AAPL")
 
-    # Initialize Tradier Client
+    # Tradier Client
     tradier_api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(tradier_api_key)
 
-    # Initialize NewsAPI Client if key is provided
+    # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
-    if newsapi_api_key:
-        newsapi_client = NewsApiClient(newsapi_api_key)
-    else:
-        newsapi_client = None
+    newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
 
     tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
@@ -89,7 +159,6 @@ def main():
 
                     predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
 
-                    # Load saved model or train new one if not found
                     try:
                         predictor.load_model()
                         st.info("Loaded pre-trained model.")
@@ -101,19 +170,11 @@ def main():
 
                     st.success("Prediction complete!")
 
-                    # Show prediction summary with confidence explanation
                     st.subheader("Prediction Summary")
                     for i, (p, c) in enumerate(zip(preds, confs), 1):
                         direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        explanation = confidence_explanation(c)
-                        st.metric(
-                            label=f"Week {i}",
-                            value=direction,
-                            delta=f"{c:.1f}% confidence"
-                        )
-                        st.caption(explanation)
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
 
-                    # Show confidence bar chart
                     plot_prediction_confidence(confs)
 
                 except Exception as e:
@@ -125,8 +186,8 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
-                    # Fetch Tradier news
                     tradier_news_data = tradier_client.get_news(symbol)
+
                     analyzer = SentimentAnalyzer()
 
                     def analyze_news_list(news_list, key_headline):
@@ -146,7 +207,6 @@ def main():
                         tradier_news_data.get('news', []), 'headline'
                     )
 
-                    # Fetch NewsAPI news if available
                     if newsapi_client:
                         newsapi_news_data = newsapi_client.get_news(symbol)
                         newsapi_sentiments, newsapi_avg, newsapi_headlines = analyze_news_list(
@@ -179,9 +239,9 @@ def main():
                 except Exception as e:
                     st.error(f"Error fetching or analyzing news: {e}")
 
-
 if __name__ == "__main__":
     main()
+
 
 
 
