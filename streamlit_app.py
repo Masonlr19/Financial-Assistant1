@@ -63,7 +63,24 @@ def main():
                 except Exception as e:
                     st.error(f"Error fetching data: {e}")
 
-    with tab1:
+        with tab1:
+        if st.button("Train Model"):
+            with st.spinner("Training model..."):
+                try:
+                    data = tradier_client.get_historical_data(symbol)
+                    preparer = WeeklyPredictorDataPreparer()
+                    X, y, prepared_data = preparer.prepare_data(data)
+
+                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
+                    predictor.train(X, y)
+
+                    import joblib
+                    joblib.dump(predictor.model, f"models/{symbol}_xgboost_model.pkl")
+
+                    st.success(f"Model trained and saved for {symbol}!")
+                except Exception as e:
+                    st.error(f"Training error: {e}")
+
         if st.button("Run Weekly Price Predictions"):
             with st.spinner("Loading model and predicting..."):
                 try:
@@ -71,10 +88,7 @@ def main():
                     preparer = WeeklyPredictorDataPreparer()
                     _, _, prepared_data = preparer.prepare_data(data)
 
-                    # Load pre-trained model
                     model = load_trained_model(symbol)
-
-                    # Create predictor with loaded model
                     predictor = XGBoostPricePredictor(preparer.scaler, prepared_data, preloaded_model=model)
                     preds, confs = predictor.predict_next_5_weeks()
 
