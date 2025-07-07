@@ -29,6 +29,22 @@ def plot_prediction_confidence(confs):
     st.pyplot(fig)
 
 
+def confidence_explanation(confidence):
+    """
+    Returns a user-friendly explanation string for confidence values.
+    """
+    if confidence >= 80:
+        return "Very high confidence in this prediction."
+    elif confidence >= 60:
+        return "Moderate to high confidence."
+    elif confidence >= 40:
+        return "Moderate confidence."
+    elif confidence >= 20:
+        return "Low confidence."
+    else:
+        return "Very low confidence; prediction uncertain."
+
+
 def main():
     st.set_page_config(page_title="Financial Assistant", layout="wide")
     st.title("💰 ML Financial Assistant")
@@ -37,11 +53,11 @@ def main():
     st.sidebar.header("🔧 Settings")
     symbol = st.sidebar.text_input("Stock Symbol", value="AAPL")
 
-    # Tradier Client
+    # Initialize Tradier Client
     tradier_api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(tradier_api_key)
 
-    # NewsAPI Client
+    # Initialize NewsAPI Client if key is provided
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
     if newsapi_api_key:
         newsapi_client = NewsApiClient(newsapi_api_key)
@@ -73,7 +89,7 @@ def main():
 
                     predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
 
-                    # Try loading saved model, otherwise train new
+                    # Load saved model or train new one if not found
                     try:
                         predictor.load_model()
                         st.info("Loaded pre-trained model.")
@@ -85,17 +101,19 @@ def main():
 
                     st.success("Prediction complete!")
 
-                    # Show metrics with confidence explanation
+                    # Show prediction summary with confidence explanation
                     st.subheader("Prediction Summary")
                     for i, (p, c) in enumerate(zip(preds, confs), 1):
                         direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                        explanation = confidence_explanation(c)
                         st.metric(
                             label=f"Week {i}",
                             value=direction,
-                            delta=f"{c}% confidence"
+                            delta=f"{c:.1f}% confidence"
                         )
+                        st.caption(explanation)
 
-                    # Show confidence chart
+                    # Show confidence bar chart
                     plot_prediction_confidence(confs)
 
                 except Exception as e:
@@ -107,9 +125,8 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
-                    # Tradier news
+                    # Fetch Tradier news
                     tradier_news_data = tradier_client.get_news(symbol)
-
                     analyzer = SentimentAnalyzer()
 
                     def analyze_news_list(news_list, key_headline):
@@ -129,7 +146,7 @@ def main():
                         tradier_news_data.get('news', []), 'headline'
                     )
 
-                    # NewsAPI news
+                    # Fetch NewsAPI news if available
                     if newsapi_client:
                         newsapi_news_data = newsapi_client.get_news(symbol)
                         newsapi_sentiments, newsapi_avg, newsapi_headlines = analyze_news_list(
@@ -165,5 +182,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
