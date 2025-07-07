@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
+import shap
 
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
@@ -78,59 +79,42 @@ def main():
 
                     st.success("Prediction complete!")
 
-                    # Show metrics with info icon tooltip
+                    # Show metrics
                     st.subheader("Prediction Summary")
-
-                    info_html = """
-                    <style>
-                    .tooltip {
-                      position: relative;
-                      display: inline-block;
-                      cursor: pointer;
-                      color: #1f77b4;
-                      font-weight: bold;
-                      font-size: 18px;
-                      margin-left: 8px;
-                    }
-                    .tooltip .tooltiptext {
-                      visibility: hidden;
-                      width: 300px;
-                      background-color: #555;
-                      color: #fff;
-                      text-align: left;
-                      border-radius: 6px;
-                      padding: 10px;
-                      position: absolute;
-                      z-index: 1;
-                      bottom: 125%;
-                      left: 50%;
-                      margin-left: -150px;
-                      opacity: 0;
-                      transition: opacity 0.3s;
-                      font-size: 14px;
-                    }
-                    .tooltip:hover .tooltiptext {
-                      visibility: visible;
-                      opacity: 1;
-                    }
-                    </style>
-
-                    <div class="tooltip">ℹ️
-                      <span class="tooltiptext">
-                        The confidence score (0-100%) reflects the model's probability estimate of the stock price increasing (if prediction is Increase) or decreasing (if prediction is Decrease) for each of the next 5 Fridays.
-                        A higher confidence means the model is more certain about its prediction.
-                        Use these scores alongside other analysis and market factors.
-                      </span>
-                    </div>
-                    """
-
-                    st.markdown(info_html, unsafe_allow_html=True)
-
                     for i, (p, c) in enumerate(zip(preds, confs), 1):
                         direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        st.metric(label=f"Week {i}", value=direction, delta=f"{c:.1f}% confidence")
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
 
+                    # Show confidence chart
                     plot_prediction_confidence(confs)
+
+                    # SHAP explainability
+                    st.markdown("### 🔍 Model Explainability with SHAP")
+
+                    explainer = shap.Explainer(predictor.model)
+                    shap_values = explainer(X)
+
+                    st.markdown("""
+                    **SHAP Summary Plot**:  
+                    This plot shows how each feature impacts the model’s predictions.  
+                    - Features pushing the prediction higher are shown in red.  
+                    - Features pushing it lower are shown in blue.  
+                    - The spread indicates feature importance across the dataset.  
+                    Understanding this helps explain *why* the model predicts price increases or decreases.
+                    """)
+
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    shap.summary_plot(shap_values, X, show=False)
+                    st.pyplot(fig)
+
+                    # Feature importance table
+                    importance_df = pd.DataFrame({
+                        "Feature": predictor.model.feature_names_in_,
+                        "Importance": predictor.model.feature_importances_
+                    }).sort_values(by="Importance", ascending=False)
+
+                    st.subheader("Feature Importances")
+                    st.dataframe(importance_df)
 
                 except Exception as e:
                     st.error(f"Prediction error: {e}")
@@ -141,7 +125,6 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
-                    # Tradier news
                     tradier_news_data = tradier_client.get_news(symbol)
 
                     analyzer = SentimentAnalyzer()
@@ -163,7 +146,6 @@ def main():
                         tradier_news_data.get('news', []), 'headline'
                     )
 
-                    # NewsAPI news
                     if newsapi_client:
                         newsapi_news_data = newsapi_client.get_news(symbol)
                         newsapi_sentiments, newsapi_avg, newsapi_headlines = analyze_news_list(
