@@ -1,12 +1,19 @@
+# Core app libraries
 streamlit
-requests
 pandas
 matplotlib
 altair
+
+# ML and data prep
 scikit-learn
 xgboost
-vaderSentiment
-newsapi-python
 joblib
+
+# NLP for sentiment
 sentence-transformers
+
+# Deep learning hybrid model
 tensorflow
+
+# APIs & HTTP requests
+requests
