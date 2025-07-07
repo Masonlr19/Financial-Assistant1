@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
-import shap
 
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
 from services.sentiment_analyzer import SentimentAnalyzer
-from models.weekly_predictor import WeeklyPredictorDataPreparer
-from models.xgboost_model import XGBoostPricePredictor
+from services.feature_engineering import prepare_features
+from models.train_weekly_predictor import WeeklyPredictorTrainer
 
 
 def plot_historical_prices(data):
@@ -30,6 +29,10 @@ def plot_prediction_confidence(confs):
     st.pyplot(fig)
 
 
+if "trainer" not in st.session_state:
+    st.session_state["trainer"] = None
+
+
 def main():
     st.set_page_config(page_title="Financial Assistant", layout="wide")
     st.title("💰 ML Financial Assistant")
@@ -38,16 +41,11 @@ def main():
     st.sidebar.header("🔧 Settings")
     symbol = st.sidebar.text_input("Stock Symbol", value="AAPL")
 
-    # Tradier Client
     tradier_api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(tradier_api_key)
 
-    # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
-    if newsapi_api_key:
-        newsapi_client = NewsApiClient(newsapi_api_key)
-    else:
-        newsapi_client = None
+    newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
 
     tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
@@ -64,60 +62,50 @@ def main():
                     st.error(f"Error fetching data: {e}")
 
     with tab1:
-        if st.button("Run Weekly Price Predictions"):
-            with st.spinner("Running ML model..."):
+        st.header(f"📈 Train & Predict for {symbol}")
+
+        if st.button("Train Model"):
+            with st.spinner("Training model..."):
                 try:
-                    data = tradier_client.get_historical_data(symbol)
+                    raw_data = tradier_client.get_historical_data(symbol)
 
-                    preparer = WeeklyPredictorDataPreparer()
-                    X, y, prepared_data = preparer.prepare_data(data)
+                    trainer = WeeklyPredictorTrainer()
+                    X, y = trainer.prepare_training_data(raw_data)
+                    trainer.train(X, y)
 
-                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-                    predictor.train(X, y)
-
-                    preds, confs = predictor.predict_next_5_weeks()
-
-                    st.success("Prediction complete!")
-
-                    # Show metrics
-                    st.subheader("Prediction Summary")
-                    for i, (p, c) in enumerate(zip(preds, confs), 1):
-                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
-
-                    # Show confidence chart
-                    plot_prediction_confidence(confs)
-
-                    # SHAP explainability
-                    st.markdown("### 🔍 Model Explainability with SHAP")
-
-                    explainer = shap.Explainer(predictor.model)
-                    shap_values = explainer(X)
-
-                    st.markdown("""
-                    **SHAP Summary Plot**:  
-                    This plot shows how each feature impacts the model’s predictions.  
-                    - Features pushing the prediction higher are shown in red.  
-                    - Features pushing it lower are shown in blue.  
-                    - The spread indicates feature importance across the dataset.  
-                    Understanding this helps explain *why* the model predicts price increases or decreases.
-                    """)
-
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    shap.summary_plot(shap_values, X, show=False)
-                    st.pyplot(fig)
-
-                    # Feature importance table
-                    importance_df = pd.DataFrame({
-                        "Feature": predictor.model.feature_names_in_,
-                        "Importance": predictor.model.feature_importances_
-                    }).sort_values(by="Importance", ascending=False)
-
-                    st.subheader("Feature Importances")
-                    st.dataframe(importance_df)
+                    st.session_state["trainer"] = trainer
+                    st.success("Model trained successfully!")
 
                 except Exception as e:
-                    st.error(f"Prediction error: {e}")
+                    st.error(f"Training failed: {e}")
+
+        if st.session_state.get("trainer"):
+            trainer = st.session_state["trainer"]
+
+            try:
+                raw_data = tradier_client.get_historical_data(symbol)
+                df_features = prepare_features(raw_data)
+                last_row = df_features.iloc[[-1]]
+
+                preds, confs = trainer.predict_next_5_weeks(last_row)
+
+                st.subheader("Prediction Summary for Next 5 Fridays")
+                for i, (p, c) in enumerate(zip(preds, confs), 1):
+                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                    st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+
+                st.info(
+                    "The confidence score represents the model's estimated probability that the stock price "
+                    "will increase next Friday. A higher confidence means the model is more certain about the prediction."
+                )
+
+                plot_prediction_confidence(confs)
+
+            except Exception as e:
+                st.error(f"Prediction failed: {e}")
+
+        else:
+            st.info("Train the model first to see predictions.")
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
@@ -126,7 +114,6 @@ def main():
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
                     tradier_news_data = tradier_client.get_news(symbol)
-
                     analyzer = SentimentAnalyzer()
 
                     def analyze_news_list(news_list, key_headline):
