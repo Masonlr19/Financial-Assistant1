@@ -13,3 +13,4 @@ class SentimentAnalyzer:
             return 'negative', compound
         else:
             return 'neutral', compound
+
