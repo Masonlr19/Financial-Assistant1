@@ -49,7 +49,43 @@ class XGBoostPricePredictor:
             raise FileNotFoundError("Model or scaler file not found.")
 
         self.model = joblib.load(self.model_path)
-        s
+        self.scaler = joblib.load(self.scaler_path)
+
+    def predict_next_5_weeks(self):
+        """
+        Predict price movement for the next 5 weeks and return confidence scores.
+        Assumes prepared_data includes the features for these 5 weeks.
+        
+        Returns:
+            preds: List of 0 or 1 indicating predicted decrease or increase
+            confs: List of confidence percentages for each prediction
+        """
+        if self.model is None:
+            raise ValueError("Model is not loaded or trained.")
+
+        # Extract features for next 5 weeks from prepared_data
+        # This depends on how prepared_data is structured.
+        # Here's an example assuming prepared_data['future_features'] exists and is a DataFrame:
+        future_features = self.prepared_data.get('future_features', None)
+        if future_features is None or len(future_features) < 5:
+            raise ValueError("Prepared data missing future features for 5 weeks.")
+
+        X_future = future_features.iloc[:5]
+
+        # Scale features
+        X_scaled = self.scaler.transform(X_future)
+
+        # Predict probabilities (probability of class 1)
+        probas = self.model.predict_proba(X_scaled)[:, 1]
+
+        # Threshold at 0.5 to get binary prediction
+        preds = (probas >= 0.5).astype(int)
+
+        # Convert probabilities to confidence percentages (0-100%)
+        confs = (probas * 100).round(1)
+
+        return preds.tolist(), confs.tolist()
+
 
 
 
