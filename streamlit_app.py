@@ -71,8 +71,14 @@ def main():
                     preparer = WeeklyPredictorDataPreparer()
                     X, y, prepared_data = preparer.prepare_data(data)
 
-                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-                    predictor.train(X, y)
+predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
+try:
+    predictor.load_model()
+except FileNotFoundError:
+    st.warning("No pre-trained model found, training a new one...")
+    predictor.train(X, y)
+
+
 
                     preds, confs = predictor.predict_next_5_weeks()
 
