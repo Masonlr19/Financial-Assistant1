@@ -2,13 +2,21 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
+import os
+import joblib
 
 from services.tradier_client import TradierClient
 from services.newsapi_client import NewsApiClient
 from services.sentiment_analyzer import SentimentAnalyzer
-from services.feature_engineering import prepare_features
-from models.train_weekly_predictor import WeeklyPredictorTrainer
+from models.weekly_predictor import WeeklyPredictorDataPreparer
+from models.xgboost_model import XGBoostPricePredictor
 
+
+def load_trained_model(symbol):
+    model_path = f"models/{symbol}_xgboost_model.pkl"
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Trained model for {symbol} not found. Please train it first.")
+    return joblib.load(model_path)
 
 def plot_historical_prices(data):
     df = pd.DataFrame(data['history']['day'])
@@ -19,7 +27,6 @@ def plot_historical_prices(data):
     ).properties(title="📊 Historical Close Prices")
     st.altair_chart(chart, use_container_width=True)
 
-
 def plot_prediction_confidence(confs):
     fig, ax = plt.subplots()
     ax.bar(range(1, 6), confs, color='green')
@@ -27,11 +34,6 @@ def plot_prediction_confidence(confs):
     ax.set_xlabel("Week")
     ax.set_ylabel("Confidence (%)")
     st.pyplot(fig)
-
-
-if "trainer" not in st.session_state:
-    st.session_state["trainer"] = None
-
 
 def main():
     st.set_page_config(page_title="Financial Assistant", layout="wide")
@@ -41,9 +43,11 @@ def main():
     st.sidebar.header("🔧 Settings")
     symbol = st.sidebar.text_input("Stock Symbol", value="AAPL")
 
+    # Tradier Client
     tradier_api_key = st.secrets["TRADIER_API_KEY"]
     tradier_client = TradierClient(tradier_api_key)
 
+    # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
     newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
 
@@ -56,56 +60,34 @@ def main():
                     data = tradier_client.get_historical_data(symbol)
                     st.success("Data fetched successfully!")
                     plot_historical_prices(data)
-                    st.subheader("Raw JSON Response")
-                    st.json(data)
                 except Exception as e:
                     st.error(f"Error fetching data: {e}")
 
     with tab1:
-        st.header(f"📈 Train & Predict for {symbol}")
-
-        if st.button("Train Model"):
-            with st.spinner("Training model..."):
+        if st.button("Run Weekly Price Predictions"):
+            with st.spinner("Loading model and predicting..."):
                 try:
-                    raw_data = tradier_client.get_historical_data(symbol)
+                    data = tradier_client.get_historical_data(symbol)
+                    preparer = WeeklyPredictorDataPreparer()
+                    _, _, prepared_data = preparer.prepare_data(data)
 
-                    trainer = WeeklyPredictorTrainer()
-                    X, y = trainer.prepare_training_data(raw_data)
-                    trainer.train(X, y)
+                    # Load pre-trained model
+                    model = load_trained_model(symbol)
 
-                    st.session_state["trainer"] = trainer
-                    st.success("Model trained successfully!")
+                    # Create predictor with loaded model
+                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data, preloaded_model=model)
+                    preds, confs = predictor.predict_next_5_weeks()
+
+                    st.success("Prediction complete!")
+                    st.subheader("Prediction Summary")
+                    for i, (p, c) in enumerate(zip(preds, confs), 1):
+                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+
+                    plot_prediction_confidence(confs)
 
                 except Exception as e:
-                    st.error(f"Training failed: {e}")
-
-        if st.session_state.get("trainer"):
-            trainer = st.session_state["trainer"]
-
-            try:
-                raw_data = tradier_client.get_historical_data(symbol)
-                df_features = prepare_features(raw_data)
-                last_row = df_features.iloc[[-1]]
-
-                preds, confs = trainer.predict_next_5_weeks(last_row)
-
-                st.subheader("Prediction Summary for Next 5 Fridays")
-                for i, (p, c) in enumerate(zip(preds, confs), 1):
-                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                    st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
-
-                st.info(
-                    "The confidence score represents the model's estimated probability that the stock price "
-                    "will increase next Friday. A higher confidence means the model is more certain about the prediction."
-                )
-
-                plot_prediction_confidence(confs)
-
-            except Exception as e:
-                st.error(f"Prediction failed: {e}")
-
-        else:
-            st.info("Train the model first to see predictions.")
+                    st.error(f"Prediction error: {e}")
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
