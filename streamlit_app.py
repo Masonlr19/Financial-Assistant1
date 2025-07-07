@@ -63,43 +63,43 @@ def main():
                     st.error(f"Error fetching data: {e}")
 
     with tab1:
-    if st.button("Run Weekly Price Predictions"):
-        with st.spinner("Running ML model..."):
-            try:
-                data = tradier_client.get_historical_data(symbol)
-
-                preparer = WeeklyPredictorDataPreparer()
-                X, y, prepared_data = preparer.prepare_data(data)
-
-                predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
-
-                # Try loading saved model, otherwise train new
+        if st.button("Run Weekly Price Predictions"):
+            with st.spinner("Running ML model..."):
                 try:
-                    predictor.load_model()
-                    st.info("Loaded pre-trained model.")
-                except FileNotFoundError:
-                    st.info("No pre-trained model found, training new model...")
-                    predictor.train(X, y)
+                    data = tradier_client.get_historical_data(symbol)
 
-                preds, confs = predictor.predict_next_5_weeks()
+                    preparer = WeeklyPredictorDataPreparer()
+                    X, y, prepared_data = preparer.prepare_data(data)
 
-                st.success("Prediction complete!")
+                    predictor = XGBoostPricePredictor(preparer.scaler, prepared_data)
 
-                # Show metrics with confidence explanation
-                st.subheader("Prediction Summary")
-                for i, (p, c) in enumerate(zip(preds, confs), 1):
-                    direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                    st.metric(
-                        label=f"Week {i}",
-                        value=direction,
-                        delta=f"{c}% confidence"
-                    )
+                    # Try loading saved model, otherwise train new
+                    try:
+                        predictor.load_model()
+                        st.info("Loaded pre-trained model.")
+                    except FileNotFoundError:
+                        st.info("No pre-trained model found, training new model...")
+                        predictor.train(X, y)
 
-                # Show confidence chart
-                plot_prediction_confidence(confs)
+                    preds, confs = predictor.predict_next_5_weeks()
 
-            except Exception as e:
-                st.error(f"Prediction error: {e}")
+                    st.success("Prediction complete!")
+
+                    # Show metrics with confidence explanation
+                    st.subheader("Prediction Summary")
+                    for i, (p, c) in enumerate(zip(preds, confs), 1):
+                        direction = "Increase 📈" if p == 1 else "Decrease 📉"
+                        st.metric(
+                            label=f"Week {i}",
+                            value=direction,
+                            delta=f"{c}% confidence"
+                        )
+
+                    # Show confidence chart
+                    plot_prediction_confidence(confs)
+
+                except Exception as e:
+                    st.error(f"Prediction error: {e}")
 
     with tab3:
         st.header(f"📰 News Sentiment for {symbol}")
@@ -165,4 +165,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
