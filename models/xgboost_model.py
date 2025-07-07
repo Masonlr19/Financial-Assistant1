@@ -1,41 +1,49 @@
-from xgboost import XGBClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
-from sklearn.model_selection import train_test_split
-import numpy as np
+import os
+import joblib
+import xgboost as xgb
 
 class XGBoostPricePredictor:
-    def __init__(self, scaler, prepared_data):
+    def __init__(self, scaler, prepared_data, model_path="models/xgboost_model.pkl"):
         self.scaler = scaler
         self.prepared_data = prepared_data
+        self.model_path = model_path
         self.model = None
-        self.metrics = {}
 
     def train(self, X, y):
-        # Split train/val (80/20)
-        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+        self.model = xgb.XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            use_label_encoder=False,
+            n_estimators=100,
+            random_state=42
+        )
+        self.model.fit(X, y)
+        # Save the model after training
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        joblib.dump(self.model, self.model_path)
+        print(f"Model saved to {self.model_path}")
 
-        self.model = XGBClassifier(use_label_encoder=False, eval_metric='logloss')
-        self.model.fit(X_train, y_train)
-
-        y_pred = self.model.predict(X_val)
-
-        # Compute metrics
-        self.metrics = {
-            "accuracy": accuracy_score(y_val, y_pred),
-            "precision": precision_score(y_val, y_pred),
-            "recall": recall_score(y_val, y_pred),
-            "f1_score": f1_score(y_val, y_pred),
-            "roc_auc": roc_auc_score(y_val, y_pred),
-            "confusion_matrix": confusion_matrix(y_val, y_pred).tolist()
-        }
+    def load_model(self):
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"No saved model found at {self.model_path}")
+        self.model = joblib.load(self.model_path)
 
     def predict_next_5_weeks(self):
-        # Example dummy implementation - replace with actual prediction logic
-        # Should return predictions (0/1) and confidence scores (0-100)
-        import random
-        preds = [random.choice([0, 1]) for _ in range(5)]
-        confs = [random.randint(50, 100) for _ in range(5)]
-        return preds, confs
+        if self.model is None:
+            self.load_model()
+
+        # Prepare features for the next 5 Fridays (this is a placeholder)
+        # You should implement feature prep matching your model's training
+        X_next_5 = self.prepared_data.get_next_5_weeks_features()
+
+        preds_proba = self.model.predict_proba(X_next_5)[:, 1]
+        preds = (preds_proba >= 0.5).astype(int)  # 1 if predicted increase, else 0
+
+        # Confidence from probability (scale 0-100)
+        confs = (preds_proba * 100).round(2)
+
+        return preds.tolist(), confs.tolist()
+
 
 
 
