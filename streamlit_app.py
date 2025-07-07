@@ -43,7 +43,10 @@ def main():
 
     # NewsAPI Client
     newsapi_api_key = st.secrets.get("NEWSAPI_API_KEY", None)
-    newsapi_client = NewsApiClient(newsapi_api_key) if newsapi_api_key else None
+    if newsapi_api_key:
+        newsapi_client = NewsApiClient(newsapi_api_key)
+    else:
+        newsapi_client = None
 
     tab1, tab2, tab3 = st.tabs(["📈 Predictions", "📊 Historical Data", "📰 News Sentiment"])
 
@@ -75,13 +78,58 @@ def main():
 
                     st.success("Prediction complete!")
 
-                    # Show metrics
+                    # Show metrics with info icon tooltip
                     st.subheader("Prediction Summary")
+
+                    info_html = """
+                    <style>
+                    .tooltip {
+                      position: relative;
+                      display: inline-block;
+                      cursor: pointer;
+                      color: #1f77b4;
+                      font-weight: bold;
+                      font-size: 18px;
+                      margin-left: 8px;
+                    }
+                    .tooltip .tooltiptext {
+                      visibility: hidden;
+                      width: 300px;
+                      background-color: #555;
+                      color: #fff;
+                      text-align: left;
+                      border-radius: 6px;
+                      padding: 10px;
+                      position: absolute;
+                      z-index: 1;
+                      bottom: 125%;
+                      left: 50%;
+                      margin-left: -150px;
+                      opacity: 0;
+                      transition: opacity 0.3s;
+                      font-size: 14px;
+                    }
+                    .tooltip:hover .tooltiptext {
+                      visibility: visible;
+                      opacity: 1;
+                    }
+                    </style>
+
+                    <div class="tooltip">ℹ️
+                      <span class="tooltiptext">
+                        The confidence score (0-100%) reflects the model's probability estimate of the stock price increasing (if prediction is Increase) or decreasing (if prediction is Decrease) for each of the next 5 Fridays.
+                        A higher confidence means the model is more certain about its prediction.
+                        Use these scores alongside other analysis and market factors.
+                      </span>
+                    </div>
+                    """
+
+                    st.markdown(info_html, unsafe_allow_html=True)
+
                     for i, (p, c) in enumerate(zip(preds, confs), 1):
                         direction = "Increase 📈" if p == 1 else "Decrease 📉"
-                        st.metric(label=f"Week {i}", value=direction, delta=f"{c}% confidence")
+                        st.metric(label=f"Week {i}", value=direction, delta=f"{c:.1f}% confidence")
 
-                    # Show confidence chart
                     plot_prediction_confidence(confs)
 
                 except Exception as e:
@@ -93,7 +141,7 @@ def main():
         if st.button("Fetch and Analyze News Sentiment (Tradier + NewsAPI)"):
             with st.spinner("Fetching news and analyzing sentiment..."):
                 try:
-                    # Tradier news with 404 error handling inside get_news method
+                    # Tradier news
                     tradier_news_data = tradier_client.get_news(symbol)
 
                     analyzer = SentimentAnalyzer()
@@ -103,7 +151,7 @@ def main():
                         compound_scores = []
                         headlines_sentiments = []
                         for article in news_list:
-                            headline = article.get(key_headline, "")
+                            headline = article[key_headline]
                             sentiment, score = analyzer.analyze_sentiment(headline)
                             sentiments[sentiment] += 1
                             compound_scores.append(score)
