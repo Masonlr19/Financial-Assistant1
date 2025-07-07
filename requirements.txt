@@ -4,3 +4,6 @@ pandas
 numpy
 scikit-learn
 xgboost
+matplotlib
+altair
+
